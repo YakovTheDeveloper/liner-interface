@@ -62,13 +62,19 @@
         @click="handleClick"
         style="border: 1px solid #ccc; cursor: crosshair"
       ></canvas>
-      <MapModal :isOpen="isModalOpen" @close="closeModal">
+      <MapModal :isOpen="isModalOpen" @close="onModalClose">
         <TerminalForm
           v-if="currentTerminalPoint"
           :current="currentTerminalPoint"
           @finish="onTerminalEdit"
+          @close="onModalClose"
         />
-        <AreaForm v-if="currentAreaToEdit" :current="currentAreaToEdit" @finish="onAreaEdit" />
+        <AreaForm
+          v-if="currentAreaToEdit"
+          :current="currentAreaToEdit"
+          @finish="onAreaEdit"
+          @close="onModalClose"
+        />
       </MapModal>
     </div>
   </div>
@@ -88,6 +94,12 @@ const canvasWidth = 800
 const canvasHeight = 600
 
 const imageStore = useImageStore()
+
+const onModalClose = () => {
+  currentAreaToEdit.value = null
+  currentTerminalPoint.value = null
+  closeModal()
+}
 
 const areas = ref<Area[]>([]),
   areaMode = ref<'none' | 'create' | 'edit'>('none'),

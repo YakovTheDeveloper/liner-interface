@@ -1,42 +1,46 @@
 <template>
   <form @submit.prevent="handleSubmit">
-    <div class="form-group">
-      <label for="direction">Direction (0-360 degrees):</label>
-      <input
-        id="direction"
-        type="number"
-        v-model="direction"
-        min="0"
-        max="360"
-        required
-        class="form-control"
-      />
+    <div class="form-inputs">
+      <div class="form-group">
+        <label for="direction">Direction (0-360 degrees):</label>
+        <input
+          id="direction"
+          type="number"
+          v-model="direction"
+          min="0"
+          max="360"
+          required
+          class="form-control"
+        />
+      </div>
+
+      <div class="form-group">
+        <label for="terminalId">Select Terminal ID:</label>
+        <select id="terminalId" v-model="terminalId" required class="form-control">
+          <option v-for="id in terminalIds" :key="id" :value="id">
+            {{ id }}
+          </option>
+        </select>
+      </div>
+
+      <!-- Direction Picker -->
+      <div class="direction-picker">
+        <canvas ref="directionCanvas" width="200" height="200" @click="handleCanvasClick" />
+      </div>
     </div>
 
-    <div class="form-group">
-      <label for="terminalId">Select Terminal ID:</label>
-      <select id="terminalId" v-model="terminalId" required class="form-control">
-        <option v-for="id in terminalIds" :key="id" :value="id">
-          {{ id }}
-        </option>
-      </select>
-    </div>
-
-    <!-- Direction Picker -->
-    <div class="direction-picker">
-      <canvas ref="directionCanvas" width="200" height="200" @click="handleCanvasClick" />
-    </div>
-
-    <button type="submit" class="btn btn-primary">Submit</button>
+    <FormActions @close="onClose" @submit="handleSubmit" />
   </form>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
 import type { TerminalPoint } from '../types'
+import FormActions from './shared/form-actions.vue'
 
 const props = defineProps<{
   current: TerminalPoint
+  onClose: VoidFunction
   onFinish: (direction: number, terminalId: number) => void
 }>()
 

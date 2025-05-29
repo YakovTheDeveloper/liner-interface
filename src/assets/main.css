@@ -1,1 +1,5 @@
 @import './base.css';
+
+.form-inputs{
+    padding: 1rem 1.25rem;
+}

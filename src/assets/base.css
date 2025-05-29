@@ -84,3 +84,56 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+button{
+  border: none;
+  background-color: unset;
+  cursor: pointer;
+}
+
+.button {
+  cursor: pointer;
+  padding: 4px 8px;
+  background-color: var(--color-background);
+  color: var(--color-heading);
+  transition-property: box-shadow;
+  transition: 80ms cubic-bezier(0.33, 1, 0.68, 1);
+  font-size: 14px;
+  border: 0;
+  line-height: 1.5;
+  border-radius: 4px;
+  box-shadow:
+    0 0 0 1px #cbd5e1,
+    0 1px 1px 0 rgba(15, 23, 41, 0.1),
+    0 2px 5px 0 rgba(52, 66, 86, 0.1);
+}
+
+.button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.button:disabled:hover {
+  box-shadow:
+    0 0 0 1px #cbd5e1,
+    0 1px 1px 0 rgba(15, 23, 41, 0.1),
+    0 2px 5px 0 rgba(52, 66, 86, 0.1);
+}
+
+.button:hover {
+  box-shadow:
+    0 0 0 1px #cbd5e1,
+    0 1px 1px 0 rgba(15, 23, 41, 0.1),
+    0 2px 5px 0 rgba(52, 66, 86, 0.1),
+    0 3px 9px 0 rgba(52, 66, 86, 0.1);
+}
+
+.button-primary {
+  background-color: #5368d5;
+  color: #ffffff;
+}
+
+.button-secondary {
+  background-color: #f8f8f8;
+  color: #334155;
+}
