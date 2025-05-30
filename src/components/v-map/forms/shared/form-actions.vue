@@ -1,7 +1,7 @@
 <template>
   <div class="form-actions">
     <button class="button button-primary" type="submit" @click="onAccept">Подтвердить</button>
-    <button class="button button-secondary" @click="onClose">Отмена</button>
+    <button class="button button-secondary" @click="onCancel">Отмена</button>
   </div>
 </template>
 
@@ -9,6 +9,7 @@
 const props = defineProps<{
   onClose: VoidFunction
   onSubmit: VoidFunction
+  onCancel: VoidFunction
 }>()
 
 const onAccept = () => {

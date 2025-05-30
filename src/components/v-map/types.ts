@@ -1,8 +1,9 @@
 export interface Area {
-  id: string
+  id: string | number
   points: Point[]
-  attachedRoutePoints: Point[]
-  objectInfo?: any
+  objectId: string
+  mapId: string
+  nodeId: number
 }
 export interface Point {
   x: number

@@ -20,7 +20,7 @@
       </button>
 
       <!-- Save Area Button -->
-      <button v-if="areaMode === 'create'" @click="saveCurrentArea" class="button_active">
+      <button v-if="areaMode === 'create'" @click="onAreaSaveClick" class="button_active">
         Сохранить область
       </button>
 
@@ -51,6 +51,18 @@
       >
         {{ terminalPointMode ? 'Завершить создание терминалов' : 'Создание терминалов' }}
       </button>
+
+      <!-- <button
+        @click="
+          () => {
+            terminalPointMode = false
+            routeMode = false
+            areaMode = 'none'
+          }
+        "
+      >
+        Отмена
+      </button> -->
     </div>
 
     <!-- Canvas -->
@@ -62,38 +74,60 @@
         @click="handleClick"
         style="border: 1px solid #ccc; cursor: crosshair"
       ></canvas>
-      <MapModal :isOpen="isModalOpen" @close="onModalClose">
+      <MapModal :isOpen="isModalOpen === 'update-terminal'" @close="onModalClose">
         <TerminalForm
-          v-if="currentTerminalPoint"
           :current="currentTerminalPoint"
           @finish="onTerminalEdit"
           @close="onModalClose"
         />
-        <AreaForm
-          v-if="currentAreaToEdit"
-          :current="currentAreaToEdit"
-          @finish="onAreaEdit"
-          @close="onModalClose"
-        />
+      </MapModal>
+      <MapModal :isOpen="isModalOpen === 'update-area'" @close="onModalClose">
+        <AreaForm @finish="onAreaEdit" @close="onModalClose" />
+      </MapModal>
+      <MapModal :isOpen="isModalOpen === 'create-area'" @close="onModalClose">
+        <AreaForm @finish="saveCurrentArea" @close="onModalClose" @cancel="cancelNewAreaCreation" />
       </MapModal>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, watchEffect, watch } from 'vue'
 import MapModal from './map-modal/MapModal.vue'
 import type { Area, Point, TerminalPoint } from './types'
 import TerminalForm from './forms/terminal-form.vue'
 import AreaForm from './forms/area-form.vue'
-import { useImageStore } from '@/stores/useImageStore'
+import { v4 as uuidv4 } from 'uuid'
+import { createArea } from '@/api/api'
+import { useDrawTools } from './composables/useDrawTools'
+import { distance, isPointInPolygon, SNAP_DISTANCE } from './composables/utils/drawUtils'
+import { useMapStore } from '@/stores/useMapStore'
+import { useMapObjectsPresentationStore } from '@/stores/useMapObjectsPresentation'
 
-const lastPoint = ref<Point | null>(null)
-const canvas = ref<HTMLCanvasElement | null>(null)
-const canvasWidth = 800
-const canvasHeight = 600
+const mapStore = useMapStore()
 
-const imageStore = useImageStore()
+const {
+  areaMode,
+  areas,
+  currentArea,
+  currentAreaToEdit,
+  currentTerminalPoint,
+  draw,
+  lastPoint,
+  routeMode,
+  terminalPointMode,
+  terminalPoints,
+  canvas,
+  canvasHeight,
+  canvasWidth,
+  handleClick,
+  points,
+  lines,
+  toggleRouteMode,
+  findNearbyPoint,
+} = useDrawTools(mapStore)
+
+const mapObjectsPresentationStore = useMapObjectsPresentationStore()
 
 const onModalClose = () => {
   currentAreaToEdit.value = null
@@ -101,46 +135,17 @@ const onModalClose = () => {
   closeModal()
 }
 
-const areas = ref<Area[]>([]),
-  areaMode = ref<'none' | 'create' | 'edit'>('none'),
-  currentArea = ref<Area | null>(null),
-  points = ref<Point[]>([]),
-  lines = ref<{ from: Point; to: Point }[]>([]),
-  routeMode = ref(false),
-  tempPair = ref<Point[]>([]),
-  terminalPoints = ref<TerminalPoint[]>([]),
-  currentTerminalPoint = ref<TerminalPoint | null>(null),
-  currentAreaToEdit = ref<Area | null>(null),
-  terminalPointMode = ref(false),
-  isModalOpen = ref(false)
+const isModalOpen = ref<'create-area' | 'update-area' | 'update-terminal' | ''>('')
 
-const img = ref(new Image())
-
-function openModal() {
-  isModalOpen.value = true
+function openModal(value: 'create-area' | 'update-area' | 'update-terminal') {
+  isModalOpen.value = value
 }
 function closeModal() {
-  isModalOpen.value = false
-}
-// Distance check threshold for snapping/deletion
-const SNAP_DISTANCE = 15
-
-// Toggle route creation mode
-function toggleRouteMode() {
-  routeMode.value = !routeMode.value
-  lastPoint.value = null
+  isModalOpen.value = ''
 }
 
 function toggleTerminalCreationMode() {
   terminalPointMode.value = !terminalPointMode.value
-}
-
-function distance(p1: Point, p2: Point): number {
-  return Math.sqrt((p1.x - p2.x) ** 2 + (p1.y - p2.y) ** 2)
-}
-
-function findNearbyPoint(p: Point): Point | null {
-  return points.value.find((pt) => distance(pt, p) < SNAP_DISTANCE) || null
 }
 
 function onTerminalEdit(direction: number, terminalId: number) {
@@ -148,6 +153,63 @@ function onTerminalEdit(direction: number, terminalId: number) {
   currentTerminalPoint.value.direction = direction
   currentTerminalPoint.value.terminalId = terminalId
   currentTerminalPoint.value = null
+  closeModal()
+  draw()
+}
+
+function openObjectSelector(area: Area) {
+  openModal()
+  currentAreaToEdit.value = area
+  //   const selectedObject = prompt('Введите объект для области:')
+  //   if (selectedObject) {
+  //     area.objectId = selectedObject
+
+  //     // Optionally: attach nearby route points
+  //     area.attachedRoutePoints = points.value.filter((p) => isPointInPolygon(p, area.points))
+
+  //     draw()
+  //   }
+}
+
+function editTerminal(point: TerminalPoint) {
+  currentTerminalPoint.value = point
+  openModal('update-terminal')
+  console.log(`output->point`, point)
+
+  draw()
+}
+
+function onAreaSaveClick() {
+  openModal('create-area')
+}
+
+async function saveCurrentArea(objectId: number) {
+  if (currentArea.value && mapStore.currentMap) {
+    try {
+      const result = await createArea({
+        cords: [[...currentArea.value.points]],
+        mapId: mapStore.currentMap.ulid,
+        objectId,
+      })
+
+      const newArea: Area = {
+        id: result.data.id.toString(),
+        points: [...currentArea.value.points],
+        attachedRoutePoints: [...currentArea.value.attachedRoutePoints],
+        objectId,
+      }
+      areas.value.push(newArea)
+    } catch (error) {}
+    closeModal()
+    currentArea.value = null
+    areaMode.value = 'none'
+    draw()
+  }
+}
+
+const cancelNewAreaCreation = () => {
+  currentArea.value = null
+  areaMode.value = 'none'
   closeModal()
   draw()
 }
@@ -160,153 +222,7 @@ function onAreaEdit() {
   draw()
 }
 
-function handleClick(event: MouseEvent) {
-  if (!canvas.value) return
-
-  const x = event.offsetX
-  const y = event.offsetY
-  const clickPoint = { x, y }
-
-  if (areaMode.value === 'edit') {
-    if (!currentArea.value) {
-      const hitArea = areas.value.find((area) => isPointInPolygon(clickPoint, area.points))
-      if (hitArea) {
-        currentArea.value = {
-          id: hitArea.id,
-          points: [...hitArea.points],
-          attachedRoutePoints: [...hitArea.attachedRoutePoints],
-          objectInfo: hitArea.objectInfo,
-        }
-      }
-    } else {
-      // In edit mode with selected area — allow adding/removing points
-      const existing = currentArea.value.points.find((p) => distance(p, clickPoint) < SNAP_DISTANCE)
-      if (existing) {
-        // Remove point if clicked on it
-        currentArea.value.points = currentArea.value.points.filter((p) => p !== existing)
-      } else {
-        // Add point to area
-        currentArea.value.points.push(clickPoint)
-      }
-    }
-    draw()
-    return
-  }
-
-  if (areaMode.value === 'create' && currentArea.value) {
-    const exists = currentArea.value.points.find((p) => distance(p, clickPoint) < SNAP_DISTANCE)
-    if (exists) {
-      currentArea.value.points = currentArea.value.points.filter((p) => p !== exists)
-    } else {
-      currentArea.value.points.push(clickPoint)
-    }
-    draw()
-    return
-  }
-
-  //terminals
-  if (terminalPointMode.value) {
-    const exists = terminalPoints.value.find((p) => distance(p, clickPoint) < SNAP_DISTANCE)
-    if (exists) {
-      terminalPoints.value = terminalPoints.value.filter((p) => p !== exists)
-    } else {
-      terminalPoints.value.push({
-        ...clickPoint,
-        direction: -1,
-        terminalId: -1,
-      })
-    }
-    draw()
-    return
-  }
-
-  // const rect = canvas.value.getBoundingClientRect();
-
-  const hitPointIndex = points.value.findIndex((pt) => distance(pt, clickPoint) < SNAP_DISTANCE)
-  if (hitPointIndex !== -1) {
-    const hitPoint = points.value[hitPointIndex]
-
-    // Remove point
-    points.value.splice(hitPointIndex, 1)
-
-    // Remove all lines connected to this point
-    lines.value = lines.value.filter((line) => line.from !== hitPoint && line.to !== hitPoint)
-
-    // Reset lastPoint if it was this one
-    if (lastPoint.value === hitPoint) {
-      lastPoint.value = null
-    }
-
-    draw()
-    return
-  }
-
-  const hitLine = lines.value.find((line) => {
-    const d1 = distance(line.from, clickPoint)
-    const d2 = distance(line.to, clickPoint)
-    const lineLen = distance(line.from, line.to)
-    return Math.abs(d1 + d2 - lineLen) < SNAP_DISTANCE
-  })
-  if (hitLine) {
-    lines.value = lines.value.filter((line) => line !== hitLine)
-    draw()
-    return
-  }
-
-  if (!routeMode.value) return
-
-  // Snap to existing point if close
-  const nearby = findNearbyPoint(clickPoint)
-  const finalPoint = nearby || clickPoint
-  if (!nearby) points.value.push(finalPoint)
-
-  if (lastPoint.value) {
-    lines.value.push({ from: lastPoint.value, to: finalPoint })
-  }
-  lastPoint.value = finalPoint
-
-  draw()
-}
-
-function openObjectSelector(area: Area) {
-  openModal()
-  currentAreaToEdit.value = area
-  //   const selectedObject = prompt('Введите объект для области:')
-  //   if (selectedObject) {
-  //     area.objectInfo = selectedObject
-
-  //     // Optionally: attach nearby route points
-  //     area.attachedRoutePoints = points.value.filter((p) => isPointInPolygon(p, area.points))
-
-  //     draw()
-  //   }
-}
-
-function editTerminal(point: TerminalPoint) {
-  currentTerminalPoint.value = point
-  openModal()
-  console.log(`output->point`, point)
-
-  draw()
-}
-
-function saveCurrentArea() {
-  if (currentArea.value) {
-    const newArea: Area = {
-      id: currentArea.value.id,
-      points: [...currentArea.value.points],
-      attachedRoutePoints: [...currentArea.value.attachedRoutePoints],
-      objectInfo: currentArea.value.objectInfo, // assuming it's a string or plain data
-    }
-    areas.value.push(newArea)
-    currentArea.value = null
-    areaMode.value = 'none'
-    draw()
-  }
-}
-
 onMounted(() => {
-  img.onload = draw
   canvas.value?.addEventListener('contextmenu', (event) => {
     event.preventDefault()
     const x = event.offsetX
@@ -325,112 +241,10 @@ onMounted(() => {
   })
 })
 
-function draw() {
-  if (!canvas.value) return
-
-  const ctx = canvas.value.getContext('2d')
-  if (!ctx) return
-
-  ctx.clearRect(0, 0, canvasWidth, canvasHeight)
-  ctx.drawImage(img.value, 0, 0, canvasWidth, canvasHeight)
-
-  areas.value.forEach((area) => {
-    const ctx = canvas.value!.getContext('2d')!
-    ctx.beginPath()
-    area.points.forEach((pt, index) => {
-      if (index === 0) ctx.moveTo(pt.x, pt.y)
-      else ctx.lineTo(pt.x, pt.y)
-    })
-    ctx.closePath()
-    ctx.fillStyle = 'rgba(0, 255, 0, 0.2)'
-    ctx.fill()
-    ctx.strokeStyle = 'green'
-    ctx.lineWidth = 2
-    ctx.stroke()
-  })
-
-  // Draw current area in creation/edit mode
-  // Draw current area in creation/edit mode
-  if (currentArea.value) {
-    ctx.beginPath()
-    currentArea.value.points.forEach((pt, index) => {
-      if (index === 0) ctx.moveTo(pt.x, pt.y)
-      else ctx.lineTo(pt.x, pt.y)
-    })
-
-    // 👇 Automatically close the polygon when more than 2 points
-    if (currentArea.value.points.length > 2) {
-      ctx.closePath()
-      ctx.fillStyle = 'rgba(255, 165, 0, 0.2)' // light orange
-      ctx.fill()
-    }
-
-    ctx.strokeStyle = 'orange'
-    ctx.setLineDash([5, 5])
-    ctx.stroke()
-    ctx.setLineDash([])
-
-    currentArea.value.points.forEach((pt) => {
-      ctx.beginPath()
-      ctx.arc(pt.x, pt.y, 5, 0, 2 * Math.PI)
-      ctx.fillStyle = 'orange'
-      ctx.fill()
-      ctx.strokeStyle = 'white'
-      ctx.lineWidth = 1
-      ctx.stroke()
-    })
-  }
-
-  // Draw lines
-  lines.value.forEach(({ from, to }) => {
-    ctx.beginPath()
-    ctx.moveTo(from.x, from.y)
-    ctx.lineTo(to.x, to.y)
-    ctx.strokeStyle = 'blue'
-    ctx.lineWidth = 3
-    ctx.stroke()
-  })
-
-  // Draw points
-  points.value.forEach((point) => {
-    ctx.beginPath()
-    ctx.arc(point.x, point.y, 6, 0, 2 * Math.PI)
-    ctx.fillStyle = 'red'
-    ctx.fill()
-    ctx.strokeStyle = 'white'
-    ctx.lineWidth = 2
-    ctx.stroke()
-  })
-
-  terminalPoints.value.forEach((point) => {
-    ctx.beginPath()
-    ctx.arc(point.x, point.y, 12, 0, 2 * Math.PI)
-    ctx.fillStyle = 'blue'
-    ctx.fill()
-    ctx.strokeStyle = 'white'
-    ctx.lineWidth = 3
-    ctx.stroke()
-    if (point.direction != null && point.direction !== -1) {
-      const angleRad = (point.direction * Math.PI) / 180 // convert to radians
-      const lineLength = 20
-
-      const endX = point.x + Math.cos(angleRad) * lineLength
-      const endY = point.y + Math.sin(angleRad) * lineLength
-
-      ctx.beginPath()
-      ctx.moveTo(point.x, point.y)
-      ctx.lineTo(endX, endY)
-      ctx.strokeStyle = 'red'
-      ctx.lineWidth = 2
-      ctx.stroke()
-    }
-  })
-}
-
 function startCreateArea() {
   areaMode.value = 'create'
   currentArea.value = {
-    id: crypto.randomUUID(),
+    id: uuidv4(),
     points: [],
     attachedRoutePoints: [],
   }
@@ -455,35 +269,66 @@ function commitAreaEdit() {
   draw()
 }
 
-function isPointInPolygon(point: Point, polygon: Point[]): boolean {
-  let inside = false
-  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-    const xi = polygon[i].x,
-      yi = polygon[i].y
-    const xj = polygon[j].x,
-      yj = polygon[j].y
+function seedRoadsFromBackend(
+  roadsFromBackend: {
+    id: number
+    mapId: string
+    source: Point
+    target: Point
+  }[],
+) {
+  roadsFromBackend.forEach(({ source, target, id }) => {
+    const existingSource = findNearbyPoint(source) || { ...source }
+    const existingTarget = findNearbyPoint(target) || { ...target }
 
-    const intersect =
-      yi > point.y !== yj > point.y && point.x < ((xj - xi) * (point.y - yi)) / (yj - yi) + xi
-    if (intersect) inside = !inside
-  }
-  return inside
+    if (!findNearbyPoint(source)) points.value = [...points.value, existingSource]
+    if (!findNearbyPoint(target)) points.value = [...points.value, existingTarget]
+
+    // Add road to lines
+    lines.value = [
+      ...lines.value,
+      {
+        id,
+        from: existingSource,
+        to: existingTarget,
+      },
+    ]
+  })
+
+  draw()
 }
 
-onMounted(() => {
-  img.value.onload = draw
-})
+watch(
+  () => mapObjectsPresentationStore.currentMapAreas,
+  () => {
+    console.log(
+      `output->mapObjectsPresentationStore.currentMapAreas`,
+      mapObjectsPresentationStore.currentMapAreas,
+    )
+
+    areas.value =
+      mapObjectsPresentationStore.currentMapAreas?.map(
+        ({ cords, id, mapId, nodeId, objectId }) => ({
+          id,
+          mapId,
+          nodeId,
+          objectId,
+          points: cords[0],
+        }),
+      ) || []
+  },
+)
 
 watch(
-  imageStore,
-  () => {
-    img.value.src = imageStore.imageUrl || ''
-    draw()
+  () => mapObjectsPresentationStore.currentMapRoads,
+  (roads) => {
+    console.log(`output->roads`, roads)
+    if (roads) {
+      seedRoadsFromBackend(roads)
+    }
   },
-  { deep: true },
+  { immediate: true }, // optional: if you want it to run on mount too
 )
-watch(points, draw, { deep: true })
-watch(lines, draw, { deep: true })
 </script>
 
 <style scoped lang="scss">

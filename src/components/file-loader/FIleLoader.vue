@@ -1,58 +1,53 @@
 <script setup lang="ts">
 import { useImageStore } from '@/stores/useImageStore'
-import { ref } from 'vue'
+import { useMapStore } from '@/stores/useMapStore'
+import { computed, ref } from 'vue'
 
-const file = ref<File | null>(null)
-const fileName = ref('')
-const isLoading = ref(false)
+const mapStore = useMapStore()
 
-// Access Pinia store
-const imageStore = useImageStore()
-
-function handleFileChange(event: Event) {
-  const target = event.target as HTMLInputElement
-  if (target.files && target.files[0]) {
-    file.value = target.files[0]
-    fileName.value = target.files[0].name
-
-    imageStore.imageUrl = URL.createObjectURL(target.files[0])
-  }
-}
-
-function handleSubmit() {
-  if (!file.value) return
-  isLoading.value = true
-
-  setTimeout(() => {
-    isLoading.value = false
-  }, 1500)
-}
+const selectedMap = computed({
+  get: () => mapStore.currentMap,
+  set: (value) => (mapStore.currentMap = value),
+})
 </script>
 
 <template>
   <div class="file-upload-container">
     <p class="title">Карта</p>
-    <form @submit.prevent="handleSubmit" class="file-form">
-      <label class="file-label">
-        <!-- Hidden actual file input -->
-        <input type="file" @change="handleFileChange" class="file-input-hidden" />
-
-        <!-- Custom styled button and file name display -->
-        <span :class="['file-custom', fileName && 'file-custom_active']">
-          {{ fileName || 'Выберите карту...' }}
-        </span>
-      </label>
+    <form class="file-form">
+      <select v-model="selectedMap" class="map-select">
+        <option disabled value="">Выберите карту...</option>
+        <option v-for="map in mapStore.maps" :key="map.ulid" :value="map">
+          {{ map.name }}
+        </option>
+      </select>
     </form>
+    <button @click="mapStore.currentMap = null">reset</button>
   </div>
 </template>
 
 <style scoped lang="scss">
+.map-select {
+  width: 100%;
+  padding: 6px 10px;
+  font-size: 14px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  background-color: #fff;
+  color: #333;
+  transition: background-color 0.2s;
+
+  &:hover {
+    background-color: #e8e8e8;
+  }
+}
+
 .file-input-hidden {
   display: none;
 }
 
-.file-form{
-    padding: 12px 0 24px;
+.file-form {
+  padding: 12px 0 24px;
 }
 
 .file-label {
@@ -92,7 +87,7 @@ function handleSubmit() {
   transition: background-color 0.2s;
   width: 100%;
 
-  &_active{
+  &_active {
     font-weight: 600;
   }
 }
