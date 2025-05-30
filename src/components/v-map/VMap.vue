@@ -67,6 +67,7 @@
 
     <!-- Canvas -->
     <div class="canvas-container">
+      <div v-if="loadingStore.isLoading" class="canvas-container-overlay">Строим маршрут...</div>
       <canvas
         ref="canvas"
         :width="canvasWidth"
@@ -103,9 +104,10 @@ import { useDrawTools } from './composables/useDrawTools'
 import { distance, isPointInPolygon, SNAP_DISTANCE } from './composables/utils/drawUtils'
 import { useMapStore } from '@/stores/useMapStore'
 import { useMapObjectsPresentationStore } from '@/stores/useMapObjectsPresentation'
+import { useLoadingStore } from '@/stores/loadingStore'
 
 const mapStore = useMapStore()
-
+const loadingStore = useLoadingStore()
 const {
   areaMode,
   areas,
@@ -341,6 +343,22 @@ canvas {
 
 .canvas-container {
   position: relative;
+
+  &-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5); /* Semi-transparent black */
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    color: #fff;
+    font-size: 18px;
+    font-weight: bold;
+    z-index: 10;
+  }
 }
 
 .buttons {

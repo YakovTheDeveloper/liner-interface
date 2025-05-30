@@ -4,6 +4,7 @@ import { distance, isPointInPolygon, SNAP_DISTANCE } from './utils/drawUtils'
 import { useImageStore } from '@/stores/useImageStore'
 import { useMapStore } from '@/stores/useMapStore'
 import { createRoad, deleteRoad } from '@/api/api'
+import { useLoadingStore } from '@/stores/loadingStore'
 
 export const useDrawTools = () => {
   const areas = ref<Area[]>([]),
@@ -26,12 +27,13 @@ export const useDrawTools = () => {
   const canvasHeight = 600
   const img = ref(new Image())
   const mapStore = useMapStore()
+  const loadingStore = useLoadingStore()
 
   function findNearbyPoint(p: Point): Point | null {
     return points.value.find((pt) => distance(pt, p) < SNAP_DISTANCE) || null
   }
 
-  function handleClick(event: MouseEvent) {
+  async function handleClick(event: MouseEvent) {
     if (!canvas.value) return
 
     const x = event.offsetX
@@ -116,21 +118,17 @@ export const useDrawTools = () => {
       return Math.abs(d1 + d2 - lineLen) < SNAP_DISTANCE
     })
 
-    if (hitLine) {
-      if (hitLine.id !== undefined) {
-        deleteRoad(hitLine.id)
+    if (hitLine && hitLine.id !== undefined) {
+      try {
+        loadingStore.setIsLoading(true)
+        await deleteRoad(hitLine.id)
+      } catch (error) {
+        console.error('Failed to delete road:', error)
+      } finally {
+        loadingStore.setIsLoading(false)
       }
-      const newLines = lines.value.filter(
-        (line) =>
-          line !== hitLine &&
-          line.id !== hitLine.id &&
-          !(
-            line.from.x === hitLine.from.x &&
-            line.from.y === hitLine.from.y &&
-            line.to.x === hitLine.to.x &&
-            line.to.y === hitLine.to.y
-          ),
-      )
+
+      const newLines = lines.value.filter((line) => line !== hitLine)
       lines.value = newLines
 
       console.log(`output-lines.value`, lines.value.length, newLines.length)
@@ -154,23 +152,23 @@ export const useDrawTools = () => {
         to: finalPoint,
       }
 
-      lines.value.push(newRoad)
-
-      // Optional: send road to backend
       const roadPayload = {
         mapId: mapStore.currentMap?.ulid,
         source: { x: newRoad.from.x, y: newRoad.from.y },
         target: { x: newRoad.to.x, y: newRoad.to.y },
       }
 
-      console.log('Sending road:', JSON.stringify(roadPayload, null, 2))
+      try {
+        loadingStore.setIsLoading(true)
+        const createdPoint = await createRoad(roadPayload)
 
-      createRoad(roadPayload)
-
-      // sendToBackend(roadPayload) // implement this if needed
-
-      // Make the end point the new start
-      lastPoint.value = finalPoint
+        lines.value.push({ ...newRoad, id: createdPoint.data.id })
+        lastPoint.value = finalPoint
+      } catch (error) {
+        console.error('Failed to create road:', error)
+      } finally {
+        loadingStore.setIsLoading(false)
+      }
     } else {
       // First point selected
       lastPoint.value = finalPoint
