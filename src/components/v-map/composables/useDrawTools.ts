@@ -1,10 +1,20 @@
 import { onMounted, ref, watch, watchEffect } from 'vue'
 import type { Area, Point, TerminalPoint } from '../types'
-import { distance, isPointInPolygon, SNAP_DISTANCE } from './utils/drawUtils'
+import {
+  distance,
+  drawCanvas,
+  isPointInPolygon,
+  isPointNearLineSegment,
+  isPointUsedInLines,
+  SNAP_DISTANCE,
+} from './utils/drawUtils'
 import { useImageStore } from '@/stores/useImageStore'
 import { useMapStore } from '@/stores/useMapStore'
 import { createRoad, deleteRoad } from '@/api/api'
 import { useLoadingStore } from '@/stores/loadingStore'
+import type { Ref } from 'vue'
+const DELETE_THRESHOLD = 6 // roughly equal to point radius
+const JOIN_THRESHOLD = 12 // larger area to detect nearby point
 
 export const useDrawTools = () => {
   const areas = ref<Area[]>([]),
@@ -28,6 +38,18 @@ export const useDrawTools = () => {
   const img = ref(new Image())
   const mapStore = useMapStore()
   const loadingStore = useLoadingStore()
+  const draw = () =>
+    drawCanvas(
+      canvas,
+      img,
+      canvasWidth,
+      canvasHeight,
+      areas,
+      currentArea,
+      lines,
+      points,
+      terminalPoints,
+    )
 
   function findNearbyPoint(p: Point): Point | null {
     return points.value.find((pt) => distance(pt, p) < SNAP_DISTANCE) || null
@@ -94,16 +116,50 @@ export const useDrawTools = () => {
       return
     }
 
-    const hitPointIndex = points.value.findIndex((pt) => distance(pt, clickPoint) < SNAP_DISTANCE)
-    if (hitPointIndex !== -1) {
-      const hitPoint = points.value[hitPointIndex]
+    // 1. DELETE: Exact (or close) click on point = delete
+    const exactPoint = points.value.find((pt) => distance(pt, clickPoint) < DELETE_THRESHOLD)
+    const clickedLine = lines.value.find((line) =>
+      isPointNearLineSegment(clickPoint, line.from, line.to, DELETE_THRESHOLD),
+    )
 
-      points.value.splice(hitPointIndex, 1)
+    if (clickedLine) {
+      try {
+        loadingStore.setIsLoading(true)
+        await deleteRoad(clickedLine.id)
+        lines.value = lines.value.filter((line) => line.id !== clickedLine.id)
+        const maybeOrphanedPoints = [clickedLine.from, clickedLine.to]
 
-      lines.value = lines.value.filter((line) => line.from !== hitPoint && line.to !== hitPoint)
+        maybeOrphanedPoints.forEach((pt) => {
+          const stillUsed = isPointUsedInLines(pt, lines.value)
+          if (!stillUsed) {
+            points.value = points.value.filter((p) => p !== pt)
+            if (lastPoint.value === pt) {
+              lastPoint.value = null
+            }
+          }
+        })
+      } catch (error) {
+        console.error('Failed to delete road (join):', error)
+      } finally {
+        loadingStore.setIsLoading(false)
+      }
+      return
+    }
 
-      // Reset lastPoint if it was this one
-      if (lastPoint.value === hitPoint) {
+    if (exactPoint) {
+      points.value = points.value.filter((pt) => pt !== exactPoint)
+      lines.value = lines.value.filter((line) => line.from !== exactPoint && line.to !== exactPoint)
+
+      try {
+        loadingStore.setIsLoading(true)
+      } catch (error) {
+        console.error('Failed to create road (join):', error)
+      } finally {
+        loadingStore.setIsLoading(false)
+        lastPoint.value = null
+      }
+
+      if (lastPoint.value === exactPoint) {
         lastPoint.value = null
       }
 
@@ -111,172 +167,83 @@ export const useDrawTools = () => {
       return
     }
 
-    const hitLine = lines.value.find((line) => {
-      const d1 = distance(line.from, clickPoint)
-      const d2 = distance(line.to, clickPoint)
-      const lineLen = distance(line.from, line.to)
-      return Math.abs(d1 + d2 - lineLen) < SNAP_DISTANCE
-    })
+    const nearbyPoint = points.value.find(
+      (pt) =>
+        distance(pt, clickPoint) >= DELETE_THRESHOLD && distance(pt, clickPoint) < JOIN_THRESHOLD,
+    )
 
-    if (hitLine && hitLine.id !== undefined) {
-      try {
-        loadingStore.setIsLoading(true)
-        await deleteRoad(hitLine.id)
-      } catch (error) {
-        console.error('Failed to delete road:', error)
-      } finally {
-        loadingStore.setIsLoading(false)
-      }
-
-      const newLines = lines.value.filter((line) => line !== hitLine)
-      lines.value = newLines
-
-      console.log(`output-lines.value`, lines.value.length, newLines.length)
-      draw()
-      return
-    }
-
-    if (!routeMode.value) return
-
-    const nearby = findNearbyPoint(clickPoint)
-    const finalPoint = nearby || clickPoint
-
-    if (!nearby) {
-      points.value.push(finalPoint)
-    }
-
-    // If we already have a starting point, draw a road from it to this new point
-    if (lastPoint.value) {
+    if (nearbyPoint && lastPoint.value) {
       const newRoad = {
         from: lastPoint.value,
-        to: finalPoint,
+        to: nearbyPoint,
       }
 
+      const target = nearbyPoint
+      const source = { x: newRoad.from.x, y: newRoad.from.y }
       const roadPayload = {
         mapId: mapStore.currentMap?.ulid,
-        source: { x: newRoad.from.x, y: newRoad.from.y },
-        target: { x: newRoad.to.x, y: newRoad.to.y },
+        source,
+        target,
       }
 
       try {
         loadingStore.setIsLoading(true)
         const createdPoint = await createRoad(roadPayload)
-
+        points.value.push(target)
         lines.value.push({ ...newRoad, id: createdPoint.data.id })
-        lastPoint.value = finalPoint
       } catch (error) {
-        console.error('Failed to create road:', error)
+        console.error('Failed to create road (join):', error)
       } finally {
         loadingStore.setIsLoading(false)
+        lastPoint.value = null
       }
-    } else {
-      // First point selected
-      lastPoint.value = finalPoint
+
+      draw()
+      return
     }
 
-    draw()
-  }
-
-  function draw() {
-    if (!canvas.value) return
-
-    const ctx = canvas.value.getContext('2d')
-    if (!ctx) return
-
-    ctx.clearRect(0, 0, canvasWidth, canvasHeight)
-    ctx.drawImage(img.value, 0, 0, canvasWidth, canvasHeight)
-
-    areas.value.forEach((area) => {
-      const ctx = canvas.value!.getContext('2d')!
-      ctx.beginPath()
-      area.points.forEach((pt, index) => {
-        if (index === 0) ctx.moveTo(pt.x, pt.y)
-        else ctx.lineTo(pt.x, pt.y)
-      })
-      ctx.closePath()
-      ctx.fillStyle = 'rgba(0, 255, 0, 0.2)'
-      ctx.fill()
-      ctx.strokeStyle = 'green'
-      ctx.lineWidth = 2
-      ctx.stroke()
-    })
-
-    // Draw current area in creation/edit mode
-    // Draw current area in creation/edit mode
-    if (currentArea.value) {
-      ctx.beginPath()
-      currentArea.value.points.forEach((pt, index) => {
-        if (index === 0) ctx.moveTo(pt.x, pt.y)
-        else ctx.lineTo(pt.x, pt.y)
-      })
-
-      // 👇 Automatically close the polygon when more than 2 points
-      if (currentArea.value.points.length > 2) {
-        ctx.closePath()
-        ctx.fillStyle = 'rgba(255, 165, 0, 0.2)' // light orange
-        ctx.fill()
-      }
-
-      ctx.strokeStyle = 'orange'
-      ctx.setLineDash([5, 5])
-      ctx.stroke()
-      ctx.setLineDash([])
-
-      currentArea.value.points.forEach((pt) => {
-        ctx.beginPath()
-        ctx.arc(pt.x, pt.y, 5, 0, 2 * Math.PI)
-        ctx.fillStyle = 'orange'
-        ctx.fill()
-        ctx.strokeStyle = 'white'
-        ctx.lineWidth = 1
-        ctx.stroke()
-      })
+    if (nearbyPoint) {
+      lastPoint.value = nearbyPoint
+      draw()
+      return
     }
 
-    // Draw lines
-    lines.value.forEach(({ from, to }) => {
-      ctx.beginPath()
-      ctx.moveTo(from.x, from.y)
-      ctx.lineTo(to.x, to.y)
-      ctx.strokeStyle = 'blue'
-      ctx.lineWidth = 3
-      ctx.stroke()
-    })
-
-    // Draw points
-    points.value.forEach((point) => {
-      ctx.beginPath()
-      ctx.arc(point.x, point.y, 6, 0, 2 * Math.PI)
-      ctx.fillStyle = 'red'
-      ctx.fill()
-      ctx.strokeStyle = 'white'
-      ctx.lineWidth = 2
-      ctx.stroke()
-    })
-
-    terminalPoints.value.forEach((point) => {
-      ctx.beginPath()
-      ctx.arc(point.x, point.y, 12, 0, 2 * Math.PI)
-      ctx.fillStyle = 'blue'
-      ctx.fill()
-      ctx.strokeStyle = 'white'
-      ctx.lineWidth = 3
-      ctx.stroke()
-      if (point.direction != null && point.direction !== -1) {
-        const angleRad = (point.direction * Math.PI) / 180 // convert to radians
-        const lineLength = 20
-
-        const endX = point.x + Math.cos(angleRad) * lineLength
-        const endY = point.y + Math.sin(angleRad) * lineLength
-
-        ctx.beginPath()
-        ctx.moveTo(point.x, point.y)
-        ctx.lineTo(endX, endY)
-        ctx.strokeStyle = 'red'
-        ctx.lineWidth = 2
-        ctx.stroke()
+    if (!nearbyPoint && lastPoint.value) {
+      const newRoad = {
+        from: lastPoint.value,
+        to: clickPoint,
       }
-    })
+
+      const target = clickPoint
+      const source = { x: newRoad.from.x, y: newRoad.from.y }
+      const roadPayload = {
+        mapId: mapStore.currentMap?.ulid,
+        source,
+        target,
+      }
+
+      try {
+        loadingStore.setIsLoading(true)
+        const createdPoint = await createRoad(roadPayload)
+        points.value.push(target)
+        lines.value.push({ ...newRoad, id: createdPoint.data.id })
+      } catch (error) {
+        console.error('Failed to create road (join):', error)
+      } finally {
+        loadingStore.setIsLoading(false)
+        lastPoint.value = null
+      }
+
+      draw()
+      return
+    }
+
+    if (!nearbyPoint && !lastPoint.value) {
+      points.value.push(clickPoint)
+      lastPoint.value = clickPoint
+      draw()
+      return
+    }
   }
 
   function toggleRouteMode() {
