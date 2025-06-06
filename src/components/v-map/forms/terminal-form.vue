@@ -1,7 +1,7 @@
 <template>
   <form @submit.prevent="handleSubmit">
     <div class="form-inputs">
-      <div class="form-group">
+      <!-- <div class="form-group">
         <label for="direction">Direction (0-360 degrees):</label>
         <input
           id="direction"
@@ -12,20 +12,31 @@
           required
           class="form-control"
         />
+      </div> -->
+      <div>
+        Выберите 
+        <div>x:{{ personPoint?.x }}</div>
+        <div>y:{{ personPoint?.y }}</div>
       </div>
 
-      <div class="form-group">
+      <!-- <div class="form-group">
         <label for="terminalId">Select Terminal ID:</label>
         <select id="terminalId" v-model="terminalId" required class="form-control">
           <option v-for="id in terminalIds" :key="id" :value="id">
             {{ id }}
           </option>
         </select>
-      </div>
+      </div> -->
 
       <!-- Direction Picker -->
+      <!-- Canvas for displaying image -->
       <div class="direction-picker">
-        <canvas ref="directionCanvas" width="200" height="200" @click="handleCanvasClick" />
+        <canvas
+          ref="directionCanvas"
+          :width="CANVAS_WIDTH"
+          :height="CANVAS_HEIGHT"
+          @click="onCanvasClick"
+        />
       </div>
     </div>
 
@@ -34,84 +45,88 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
-import type { TerminalPoint } from '../types'
+import { ref, onMounted } from 'vue'
 import FormActions from './shared/form-actions.vue'
+import { useImageStore } from '@/stores/useImageStore'
+import { storeToRefs } from 'pinia'
+import type { Point } from '../types'
+
+const CANVAS_WIDTH = 800
+const CANVAS_HEIGHT = 600
 
 const props = defineProps<{
-  current: TerminalPoint
+  current: { x: number; y: number }
   onClose: VoidFunction
   onFinish: (direction: number, terminalId: number) => void
 }>()
 
-const direction = ref<number | null>(props.current.direction ?? null)
-const terminalId = ref<number | null>(props.current.terminalId ?? null)
-const terminalIds = ref<number[]>([1, 2, 3, 4, 5])
+const personPoint = ref<Point | null>(null)
+const directionCanvas = ref<HTMLCanvasElement | null>(null)
+const imageStore = storeToRefs(useImageStore())
 
-const handleSubmit = () => {
-  console.log('Submitting with direction:', direction.value, 'terminalId:', terminalId.value)
-  if (direction.value !== null && terminalId.value !== null) {
-    props.onFinish(direction.value, terminalId.value)
-  }
+const onCanvasClick = (event) => {
+  const x = event.offsetX
+  const y = event.offsetY
+  const clickPoint = { x, y }
+  personPoint.value = clickPoint
+  drawImageCanvas()
 }
 
-// Direction Picker Logic
-const directionCanvas = ref<HTMLCanvasElement | null>(null)
-
-const drawDirectionCircle = () => {
+const drawImageCanvas = () => {
+  console.log(`output->draw`)
   const canvas = directionCanvas.value
   if (!canvas) return
 
   const ctx = canvas.getContext('2d')
   if (!ctx) return
 
-  const radius = canvas.width / 2
-  ctx.clearRect(0, 0, canvas.width, canvas.height)
+  const image = new Image()
+  image.src = imageStore.imageUrl.value
+  image.width = 800
+  image.height = 600
+  const point = { x: props.current.x, y: props.current.y }
+  image.onload = () => {
+    const imageWidth = 800
+    const imageHeight = 600
 
-  // Draw base circle
-  ctx.beginPath()
-  ctx.arc(radius, radius, radius - 10, 0, 2 * Math.PI)
-  ctx.strokeStyle = '#aaa'
-  ctx.lineWidth = 2
-  ctx.stroke()
+    const centerX = props.current.x
+    const centerY = props.current.y
 
-  // Draw direction line
-  if (direction.value !== null) {
-    const angleRad = (direction.value * Math.PI) / 180
-    const x = radius + Math.cos(angleRad) * (radius - 15)
-    const y = radius + Math.sin(angleRad) * (radius - 15)
+    // Crop top-left to center (centerX, centerY)
+    let sx = centerX - CANVAS_WIDTH / 2
+    let sy = centerY - CANVAS_HEIGHT / 2
+
+    ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT)
+    ctx.drawImage(image, 0, 0, CANVAS_WIDTH, CANVAS_WIDTH)
 
     ctx.beginPath()
-    ctx.moveTo(radius, radius)
-    ctx.lineTo(x, y)
-    ctx.strokeStyle = 'red'
-    ctx.lineWidth = 10
+    ctx.arc(point.x, point.y, 20, 0, 2 * Math.PI)
+    ctx.fillStyle = 'white'
+    ctx.fill()
+    ctx.strokeStyle = 'white'
+    ctx.lineWidth = 2
     ctx.stroke()
+
+    if (personPoint.value) {
+      ctx.beginPath()
+      ctx.arc(personPoint.value.x, personPoint.value.y, 20, 0, 2 * Math.PI)
+      ctx.fillStyle = 'red'
+      ctx.fill()
+      ctx.strokeStyle = 'red'
+      ctx.lineWidth = 2
+      ctx.stroke()
+    }
   }
 }
 
-const handleCanvasClick = (e: MouseEvent) => {
-  const canvas = directionCanvas.value
-  if (!canvas) return
-
-  const rect = canvas.getBoundingClientRect()
-  const x = e.clientX - rect.left
-  const y = e.clientY - rect.top
-
-  const centerX = canvas.width / 2
-  const centerY = canvas.height / 2
-
-  const dx = x - centerX
-  const dy = y - centerY
-
-  let angle = (Math.atan2(dy, dx) * 180) / Math.PI
-  if (angle < 0) angle += 360
-
-  direction.value = Math.round(angle)
+const handleSubmit = () => {
+  // console.log('Submitting with direction:', direction.value, 'terminalId:', terminalId.value)
+  // if (direction.value !== null && terminalId.value !== null) {
+  //   props.onFinish(direction.value, terminalId.value)
+  // }
 }
 
-onMounted(drawDirectionCircle)
-watch(direction, drawDirectionCircle)
+onMounted(drawImageCanvas)
 </script>
 
 <style scoped lang="scss">
@@ -137,7 +152,8 @@ watch(direction, drawDirectionCircle)
 
 canvas {
   border: 1px solid #ccc;
-  border-radius: 50%;
+  // border-radius: 50%;
+  transform: scale(0.5);
   cursor: pointer;
 }
 </style>

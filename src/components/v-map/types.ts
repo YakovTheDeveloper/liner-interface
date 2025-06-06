@@ -11,5 +11,5 @@ export interface Point {
 }
 export interface TerminalPoint extends Point {
   direction: number
-  terminalId: number
+  terminalId: string
 }

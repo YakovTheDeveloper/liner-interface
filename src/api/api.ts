@@ -9,6 +9,7 @@ import type {
   Point,
 } from './types'
 import { apiClient } from '.'
+import type { Terminal, TerminalPayload, TerminalPutPayload } from '@/entities/terminal'
 
 // ---------------------- AREA ----------------------
 
@@ -39,3 +40,15 @@ export const deleteRoad = (id: number) => apiClient.delete<void>(`/roads/${id}`)
 
 export const findShortestPath = (data: ShortestPathInput) =>
   apiClient.post<Point[]>('/roads/shortest-path', data)
+
+// ---------------------- TERMINALS ----------------------
+
+export const getTerminals = () => apiClient.get<Terminal[]>('/terminals')
+
+export const createTerminal = (data: TerminalPayload) =>
+  apiClient.post<Terminal>('/terminals', data)
+
+export const updateTerminal = (id: number, data: TerminalPutPayload) =>
+  apiClient.patch<Terminal>(`/terminals/${id}`, data)
+
+export const deleteTerminal = (id: number) => apiClient.delete<void>(`/terminals/${id}`)

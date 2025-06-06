@@ -13,10 +13,11 @@ import { useMapStore } from '@/stores/useMapStore'
 import { createRoad, deleteRoad } from '@/api/api'
 import { useLoadingStore } from '@/stores/loadingStore'
 import type { Ref } from 'vue'
+import type { ModalStore } from './useModal'
 const DELETE_THRESHOLD = 6 // roughly equal to point radius
 const JOIN_THRESHOLD = 12 // larger area to detect nearby point
 
-export const useDrawTools = () => {
+export const useDrawTools = (modalStore: ModalStore) => {
   const areas = ref<Area[]>([]),
     areaMode = ref<'none' | 'create' | 'edit'>('none'),
     currentArea = ref<Area | null>(null),
@@ -26,6 +27,7 @@ export const useDrawTools = () => {
     tempPair = ref<Point[]>([]),
     terminalPoints = ref<TerminalPoint[]>([]),
     currentTerminalPoint = ref<TerminalPoint | null>(null),
+    draftTerminalPoint = ref<Omit<TerminalPoint, 'terminalId'> | null>(null),
     currentAreaToEdit = ref<Area | null>(null),
     currentAreaToCreate = ref<Area | null>(null),
     terminalPointMode = ref(false),
@@ -106,11 +108,13 @@ export const useDrawTools = () => {
       if (exists) {
         terminalPoints.value = terminalPoints.value.filter((p) => p !== exists)
       } else {
-        terminalPoints.value.push({
-          ...clickPoint,
-          direction: -1,
-          terminalId: -1,
-        })
+        modalStore.openModal('create-terminal')
+
+        draftTerminalPoint.value = {
+          direction: 90,
+          x,
+          y,
+        }
       }
       draw()
       return
@@ -283,6 +287,7 @@ export const useDrawTools = () => {
     points,
     lines,
     canvasHeight,
+    draftTerminalPoint,
     findNearbyPoint,
     handleClick,
   }

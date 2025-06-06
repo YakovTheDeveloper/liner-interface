@@ -75,17 +75,26 @@
         @click="handleClick"
         style="border: 1px solid #ccc; cursor: crosshair"
       ></canvas>
-      <MapModal :isOpen="isModalOpen === 'update-terminal'" @close="onModalClose">
+      <MapModal :isOpen="modalStore.isModalOpen.value === 'update-terminal'" @close="onModalClose">
         <TerminalForm
+          v-if="currentTerminalPoint"
           :current="currentTerminalPoint"
           @finish="onTerminalEdit"
           @close="onModalClose"
         />
       </MapModal>
-      <MapModal :isOpen="isModalOpen === 'update-area'" @close="onModalClose">
+      <MapModal :isOpen="modalStore.isModalOpen.value === 'create-terminal'" @close="onModalClose">
+        <TerminalForm
+          v-if="draftTerminalPoint"
+          :current="draftTerminalPoint"
+          @finish="onTerminalCreate"
+          @close="onModalClose"
+        />
+      </MapModal>
+      <MapModal :isOpen="modalStore.isModalOpen.value === 'update-area'" @close="onModalClose">
         <AreaForm @finish="onAreaEdit" @close="onModalClose" />
       </MapModal>
-      <MapModal :isOpen="isModalOpen === 'create-area'" @close="onModalClose">
+      <MapModal :isOpen="modalStore.isModalOpen.value === 'create-area'" @close="onModalClose">
         <AreaForm @finish="saveCurrentArea" @close="onModalClose" @cancel="cancelNewAreaCreation" />
       </MapModal>
     </div>
@@ -99,12 +108,15 @@ import type { Area, Point, TerminalPoint } from './types'
 import TerminalForm from './forms/terminal-form.vue'
 import AreaForm from './forms/area-form.vue'
 import { v4 as uuidv4 } from 'uuid'
-import { createArea } from '@/api/api'
+import { createArea, createTerminal } from '@/api/api'
 import { useDrawTools } from './composables/useDrawTools'
 import { distance, isPointInPolygon, SNAP_DISTANCE } from './composables/utils/drawUtils'
 import { useMapStore } from '@/stores/useMapStore'
 import { useMapObjectsPresentationStore } from '@/stores/useMapObjectsPresentation'
 import { useLoadingStore } from '@/stores/loadingStore'
+import type { Terminal } from '@/entities/terminal'
+import { useModal } from './composables/useModal'
+const modalStore = useModal()
 
 const mapStore = useMapStore()
 const loadingStore = useLoadingStore()
@@ -114,6 +126,7 @@ const {
   currentArea,
   currentAreaToEdit,
   currentTerminalPoint,
+  draftTerminalPoint,
   draw,
   lastPoint,
   routeMode,
@@ -127,23 +140,16 @@ const {
   lines,
   toggleRouteMode,
   findNearbyPoint,
-} = useDrawTools(mapStore)
+} = useDrawTools(modalStore)
 
 const mapObjectsPresentationStore = useMapObjectsPresentationStore()
 
 const onModalClose = () => {
   currentAreaToEdit.value = null
   currentTerminalPoint.value = null
-  closeModal()
-}
-
-const isModalOpen = ref<'create-area' | 'update-area' | 'update-terminal' | ''>('')
-
-function openModal(value: 'create-area' | 'update-area' | 'update-terminal') {
-  isModalOpen.value = value
-}
-function closeModal() {
-  isModalOpen.value = ''
+  draftTerminalPoint.value = null
+  currentTerminalPoint.value = null
+  modalStore.closeModal()
 }
 
 function toggleTerminalCreationMode() {
@@ -155,12 +161,35 @@ function onTerminalEdit(direction: number, terminalId: number) {
   currentTerminalPoint.value.direction = direction
   currentTerminalPoint.value.terminalId = terminalId
   currentTerminalPoint.value = null
-  closeModal()
+  modalStore.closeModal()
+  draw()
+}
+
+async function onTerminalCreate(direction: number) {
+  if (!draftTerminalPoint.value) return
+  modalStore.closeModal()
+  const { x, y } = draftTerminalPoint.value
+  try {
+    loadingStore.setIsLoading(true)
+    const result = await createTerminal({
+      x,
+      y,
+      mapId: mapStore.currentMap?.ulid!,
+      personPoint: { x: 0, y: 0 },
+    })
+    terminalPoints.value.push({
+      ...result.data,
+      direction: 0,
+    })
+  } catch (error) {
+  } finally {
+    loadingStore.setIsLoading(false)
+  }
   draw()
 }
 
 function openObjectSelector(area: Area) {
-  openModal()
+  modalStore.openModal()
   currentAreaToEdit.value = area
   //   const selectedObject = prompt('Введите объект для области:')
   //   if (selectedObject) {
@@ -175,14 +204,14 @@ function openObjectSelector(area: Area) {
 
 function editTerminal(point: TerminalPoint) {
   currentTerminalPoint.value = point
-  openModal('update-terminal')
+  modalStore.openModal('update-terminal')
   console.log(`output->point`, point)
 
   draw()
 }
 
 function onAreaSaveClick() {
-  openModal('create-area')
+  modalStore.openModal('create-area')
 }
 
 async function saveCurrentArea(objectId: number) {
@@ -202,7 +231,7 @@ async function saveCurrentArea(objectId: number) {
       }
       areas.value.push(newArea)
     } catch (error) {}
-    closeModal()
+    modalStore.closeModal()
     currentArea.value = null
     areaMode.value = 'none'
     draw()
@@ -212,7 +241,7 @@ async function saveCurrentArea(objectId: number) {
 const cancelNewAreaCreation = () => {
   currentArea.value = null
   areaMode.value = 'none'
-  closeModal()
+  modalStore.closeModal()
   draw()
 }
 
@@ -220,7 +249,7 @@ function onAreaEdit() {
   if (!currentAreaToEdit.value) return
 
   currentAreaToEdit.value = null
-  closeModal()
+  modalStore.closeModal()
   draw()
 }
 
@@ -300,6 +329,17 @@ function seedRoadsFromBackend(
   draw()
 }
 
+function seedTerminalsFromBackend(terminalsFromBackend: Terminal[]) {
+  terminalPoints.value = terminalsFromBackend.map(({ terminalId, x, y }) => ({
+    direction: -1,
+    x,
+    y,
+    terminalId,
+  }))
+
+  draw()
+}
+
 watch(
   () => mapObjectsPresentationStore.currentMapAreas,
   () => {
@@ -323,13 +363,14 @@ watch(
 
 watch(
   () => mapObjectsPresentationStore.currentMapRoads,
-  (roads) => {
-    console.log(`output->roads`, roads)
-    if (roads) {
-      seedRoadsFromBackend(roads)
-    }
-  },
-  { immediate: true }, // optional: if you want it to run on mount too
+  (roads) => roads && seedRoadsFromBackend(roads),
+  { immediate: true },
+)
+
+watch(
+  () => mapObjectsPresentationStore.currentMapTerminals,
+  (terminals) => terminals && seedTerminalsFromBackend(terminals),
+  { immediate: true },
 )
 </script>
 
