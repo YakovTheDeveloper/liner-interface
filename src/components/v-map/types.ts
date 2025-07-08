@@ -10,6 +10,6 @@ export interface Point {
   y: number
 }
 export interface TerminalPoint extends Point {
-  direction: number
+  direction: Point
   terminalId: string
 }

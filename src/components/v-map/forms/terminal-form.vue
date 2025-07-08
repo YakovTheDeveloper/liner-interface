@@ -14,7 +14,7 @@
         />
       </div> -->
       <div>
-        Выберите 
+        Выберите
         <div>x:{{ personPoint?.x }}</div>
         <div>y:{{ personPoint?.y }}</div>
       </div>
@@ -56,11 +56,12 @@ const CANVAS_HEIGHT = 600
 
 const props = defineProps<{
   current: { x: number; y: number }
+  personPoint?: { x: number; y: number }
   onClose: VoidFunction
-  onFinish: (direction: number, terminalId: number) => void
+  onFinish: (personPoint: Point, terminalId?: number) => void
 }>()
 
-const personPoint = ref<Point | null>(null)
+const personPoint = ref<Point | null>(props.personPoint || null)
 const directionCanvas = ref<HTMLCanvasElement | null>(null)
 const imageStore = storeToRefs(useImageStore())
 
@@ -108,8 +109,27 @@ const drawImageCanvas = () => {
     ctx.stroke()
 
     if (personPoint.value) {
+      const angle = Math.atan2(
+        props.current.y - personPoint.value.y,
+        props.current.x - personPoint.value.x,
+      )
+      const size = 20
+
       ctx.beginPath()
-      ctx.arc(personPoint.value.x, personPoint.value.y, 20, 0, 2 * Math.PI)
+      ctx.moveTo(
+        personPoint.value.x + size * Math.cos(angle),
+        personPoint.value.y + size * Math.sin(angle),
+      )
+      ctx.lineTo(
+        personPoint.value.x + size * Math.cos(angle + 2.6),
+        personPoint.value.y + size * Math.sin(angle + 2.6),
+      )
+      ctx.lineTo(
+        personPoint.value.x + size * Math.cos(angle - 2.6),
+        personPoint.value.y + size * Math.sin(angle - 2.6),
+      )
+      ctx.closePath()
+
       ctx.fillStyle = 'red'
       ctx.fill()
       ctx.strokeStyle = 'red'
@@ -120,6 +140,8 @@ const drawImageCanvas = () => {
 }
 
 const handleSubmit = () => {
+  if (!personPoint.value) return
+  props.onFinish(personPoint.value)
   // console.log('Submitting with direction:', direction.value, 'terminalId:', terminalId.value)
   // if (direction.value !== null && terminalId.value !== null) {
   //   props.onFinish(direction.value, terminalId.value)

@@ -165,21 +165,24 @@ function onTerminalEdit(direction: number, terminalId: number) {
   draw()
 }
 
-async function onTerminalCreate(direction: number) {
+async function onTerminalCreate(personPoint: Point) {
+  console.log(`output->wtf`, draftTerminalPoint.value)
   if (!draftTerminalPoint.value) return
   modalStore.closeModal()
   const { x, y } = draftTerminalPoint.value
   try {
     loadingStore.setIsLoading(true)
+
+    // требует terminalId для создания терминала
     const result = await createTerminal({
       x,
       y,
       mapId: mapStore.currentMap?.ulid!,
-      personPoint: { x: 0, y: 0 },
+      personPoint,
     })
     terminalPoints.value.push({
       ...result.data,
-      direction: 0,
+      direction: personPoint,
     })
   } catch (error) {
   } finally {
@@ -189,7 +192,7 @@ async function onTerminalCreate(direction: number) {
 }
 
 function openObjectSelector(area: Area) {
-  modalStore.openModal()
+  modalStore.openModal('update-area')
   currentAreaToEdit.value = area
   //   const selectedObject = prompt('Введите объект для области:')
   //   if (selectedObject) {
